@@ -2,17 +2,30 @@ import carla
 import cv2
 import numpy as np
 import threading
+import torch
+import os
+
+def get_gpu_memory():
+    result = os.popen('nvidia-smi --query-gpu=memory.used --format=csv,nounits,noheader').read()
+    mem_used = int(result.strip().split('\n')[0])  # 获取第一个 GPU 的显存占用
+    return mem_used
 
 class GetSensors:
-    def __init__(self, actor, sensors_config):
+    def __init__(self, actor, sensors_config, buffer_queue):
         self._actor = actor
+        self._sensors_config = sensors_config
+        self._buffer_queue = buffer_queue
         self._cv_images = {}
         self._sensors = []
 
         world = actor.get_world()
         blueprint_library = world.get_blueprint_library()
 
-        for sensor_config in sensors_config:
+        print("Before BEV creation:")
+        print("GPU memory used (MB):", get_gpu_memory())
+ 
+
+        for sensor_config in self._sensors_config:
             blueprint = blueprint_library.find(sensor_config['type'])
             for attr, value in sensor_config.get('attributes', {}).items():
                 blueprint.set_attribute(attr, str(value))
@@ -32,7 +45,9 @@ class GetSensors:
         if isinstance(data, carla.Image):
             image_data = np.frombuffer(data.raw_data, dtype=np.uint8)
             np_image = np.reshape(image_data, (data.height, data.width, 4))
-            self._cv_images[sensor_id] = np_image[:, :, :3][:, :, ::-1]  # Convert BGRA to RGB
+
+            # Convert BGRA to RGB
+            self._cv_images[sensor_id] = np_image[:, :, :3][:, :, ::-1]
  
     def render(self):
         display = []
@@ -57,8 +72,8 @@ class GetSensors:
         ]:
             if sensor_id in self._cv_images:
                 display.append(self._cv_images[sensor_id])
-
-        if len(display) == 9:
+        # print(len(display))
+        if len(display) == 7:
             top_row = cv2.hconcat([display[0], display[1], display[2]])
             middle_row = cv2.hconcat([display[3], display[4], display[5]])
             bottom_row = cv2.hconcat([display[6], display[7], display[8]])
@@ -72,8 +87,16 @@ class GetSensors:
             cv2.imshow("Carla Camera Visualizer", combined_image)
             cv2.resizeWindow("Carla Camera Visualizer", 800, 600)
             cv2.waitKey(1)
+
+            print("After BEV creation:")
+            print("GPU memory used (MB):", get_gpu_memory())
+            
  
     def reset(self):
         for sensor in self._sensors:
-            sensor.destroy()
+            try:
+                sensor.destroy()
+            except Exception as e:
+                print(f"Error")
+        
         self._sensors.clear()
